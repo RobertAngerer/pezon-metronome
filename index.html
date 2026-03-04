@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pezon - Voice Metronome</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'SF Pro Display', -apple-system, system-ui, sans-serif;
+    background: #0a0a0f;
+    color: #e0e0e0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  .ring {
+    position: relative;
+    width: 320px;
+    height: 320px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .ring svg {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+  }
+
+  .ring-bg { stroke: #1a1a2e; }
+  .ring-fg {
+    stroke: #6c63ff;
+    transition: stroke 0.1s;
+    filter: drop-shadow(0 0 8px rgba(108, 99, 255, 0.4));
+  }
+  .ring.playing .ring-fg { stroke: #7c74ff; }
+  .ring.accent .ring-fg { stroke: #ff6b6b; filter: drop-shadow(0 0 12px rgba(255, 107, 107, 0.5)); }
+
+  .bpm-display {
+    font-size: 5rem;
+    font-weight: 200;
+    letter-spacing: -2px;
+    line-height: 1;
+    cursor: default;
+  }
+
+  .bpm-label {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    color: #555;
+    margin-top: 4px;
+  }
+
+  .controls {
+    display: flex;
+    gap: 16px;
+    margin-top: 40px;
+    align-items: center;
+  }
+
+  button {
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+    color: #ccc;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    font-size: 1.3rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  button:hover { background: #252540; border-color: #6c63ff; color: #fff; }
+  button:active { transform: scale(0.95); }
+
+  .play-btn {
+    width: 72px;
+    height: 72px;
+    font-size: 1.6rem;
+    background: #6c63ff;
+    border-color: #6c63ff;
+    color: #fff;
+  }
+  .play-btn:hover { background: #7c74ff; border-color: #7c74ff; }
+
+  .time-sig {
+    margin-top: 24px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .beat-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+    transition: all 0.08s;
+  }
+  .beat-dot.active { background: #6c63ff; border-color: #6c63ff; box-shadow: 0 0 8px rgba(108, 99, 255, 0.5); }
+  .beat-dot.accent { background: #ff6b6b; border-color: #ff6b6b; box-shadow: 0 0 8px rgba(255, 107, 107, 0.5); }
+
+  .voice-status {
+    position: fixed;
+    bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #444;
+    letter-spacing: 1px;
+  }
+
+  .mic-icon {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #333;
+    transition: background 0.2s;
+  }
+  .mic-icon.listening { background: #ff6b6b; box-shadow: 0 0 6px rgba(255, 107, 107, 0.5); }
+
+  .toast {
+    position: fixed;
+    top: 24px;
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: #aaa;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: all 0.3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  .tap-hint {
+    margin-top: 12px;
+    font-size: 0.75rem;
+    color: #333;
+    letter-spacing: 1px;
+  }
+
+  .cmd-input {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .cmd-input input {
+    background: #111;
+    border: 1px solid #2a2a3e;
+    color: #ccc;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    width: 160px;
+    outline: none;
+    font-family: inherit;
+  }
+  .cmd-input input:focus { border-color: #6c63ff; }
+  .cmd-input input::placeholder { color: #444; }
+
+  .time-select {
+    margin-top: 20px;
+    display: flex;
+    gap: 8px;
+  }
+  .time-select button {
+    width: 40px;
+    height: 40px;
+    font-size: 0.85rem;
+    border-radius: 8px;
+  }
+  .time-select button.active {
+    background: #6c63ff;
+    border-color: #6c63ff;
+    color: #fff;
+  }
+</style>
+</head>
+<body>
+
+<div class="ring" id="ring">
+  <svg viewBox="0 0 320 320">
+    <circle class="ring-bg" cx="160" cy="160" r="148" fill="none" stroke-width="3"/>
+    <circle class="ring-fg" cx="160" cy="160" r="148" fill="none" stroke-width="3"
+      stroke-dasharray="929.91" stroke-dashoffset="929.91" stroke-linecap="round" id="progress"/>
+  </svg>
+  <div style="text-align:center">
+    <div class="bpm-display" id="bpmDisplay">120</div>
+    <div class="bpm-label">bpm</div>
+  </div>
+</div>
+
+<div class="time-sig" id="beatDots"></div>
+
+<div class="controls">
+  <button id="decBtn" title="Decrease BPM">-</button>
+  <button class="play-btn" id="playBtn" title="Play / Stop">&#9654;</button>
+  <button id="incBtn" title="Increase BPM">+</button>
+</div>
+
+<div class="time-select">
+  <button data-beats="2">2/4</button>
+  <button data-beats="3">3/4</button>
+  <button data-beats="4" class="active">4/4</button>
+  <button data-beats="6">6/8</button>
+</div>
+
+<div class="tap-hint">tap space to tap tempo &middot; scroll to adjust</div>
+
+<div class="voice-status">
+  <div class="mic-icon" id="micIcon"></div>
+  <span id="voiceLabel">say "start", "stop", or a number</span>
+</div>
+<div id="voiceLog" style="color:#888;font-size:0.75rem;text-align:center;margin-top:0.25rem;min-height:1.2em"></div>
+<div class="cmd-input" id="cmdInput" style="display:none">
+  <input type="text" id="cmdField" placeholder="type command..." autocomplete="off">
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const masterGain = audioCtx.createGain();
+masterGain.connect(audioCtx.destination);
+
+// ---- Nice-sounding click synthesis ----
+function playClick(isAccent, time) {
+  const t = time || audioCtx.currentTime;
+
+  // Main click: short sine burst
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(isAccent ? 1200 : 800, t);
+  osc.frequency.exponentialRampToValueAtTime(isAccent ? 600 : 400, t + 0.04);
+  gain.gain.setValueAtTime(isAccent ? 0.6 : 0.35, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+  osc.connect(gain).connect(masterGain);
+  osc.start(t);
+  osc.stop(t + 0.06);
+
+  // Add a subtle noise transient for "wood" character
+  const bufSize = audioCtx.sampleRate * 0.02;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufSize, 8);
+  const noise = audioCtx.createBufferSource();
+  const nGain = audioCtx.createGain();
+  const filter = audioCtx.createBiquadFilter();
+  noise.buffer = buf;
+  filter.type = 'bandpass';
+  filter.frequency.value = isAccent ? 3500 : 2500;
+  filter.Q.value = 1.5;
+  nGain.gain.setValueAtTime(isAccent ? 0.5 : 0.25, t);
+  nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+  noise.connect(filter).connect(nGain).connect(masterGain);
+  noise.start(t);
+}
+
+// ---- State ----
+let bpm = 120;
+let beatsPerMeasure = 4;
+let playing = false;
+let currentBeat = 0;
+let nextNoteTime = 0;
+let timerID = null;
+const scheduleAheadTime = 0.1;
+const lookahead = 25;
+
+const bpmDisplay = document.getElementById('bpmDisplay');
+const playBtn = document.getElementById('playBtn');
+const ring = document.getElementById('ring');
+const progress = document.getElementById('progress');
+const beatDotsEl = document.getElementById('beatDots');
+const toast = document.getElementById('toast');
+
+function setBpm(v) {
+  bpm = Math.max(20, Math.min(300, Math.round(v)));
+  bpmDisplay.textContent = bpm;
+}
+
+function setBeats(n) {
+  beatsPerMeasure = n;
+  currentBeat = 0;
+  renderBeatDots();
+  document.querySelectorAll('.time-select button').forEach(b =>
+    b.classList.toggle('active', +b.dataset.beats === n));
+}
+
+function renderBeatDots() {
+  beatDotsEl.innerHTML = '';
+  for (let i = 0; i < beatsPerMeasure; i++) {
+    const d = document.createElement('div');
+    d.className = 'beat-dot';
+    beatDotsEl.appendChild(d);
+  }
+}
+
+function lightBeat(beat) {
+  const dots = beatDotsEl.children;
+  for (let i = 0; i < dots.length; i++) {
+    dots[i].classList.remove('active', 'accent');
+  }
+  if (dots[beat]) {
+    dots[beat].classList.add(beat === 0 ? 'accent' : 'active');
+  }
+  ring.classList.toggle('accent', beat === 0);
+
+  // Progress ring
+  const frac = (beat + 1) / beatsPerMeasure;
+  const circ = 929.91;
+  progress.setAttribute('stroke-dashoffset', circ * (1 - frac));
+}
+
+function scheduler() {
+  while (nextNoteTime < audioCtx.currentTime + scheduleAheadTime) {
+    const isAccent = currentBeat === 0;
+    playClick(isAccent, nextNoteTime);
+
+    // Schedule UI update
+    const beatSnap = currentBeat;
+    const delay = (nextNoteTime - audioCtx.currentTime) * 1000;
+    setTimeout(() => lightBeat(beatSnap), Math.max(0, delay));
+
+    nextNoteTime += 60.0 / bpm;
+    currentBeat = (currentBeat + 1) % beatsPerMeasure;
+  }
+}
+
+function start() {
+  if (playing) return;
+  masterGain.gain.value = 1;
+  const go = () => {
+    playing = true;
+    currentBeat = 0;
+    nextNoteTime = audioCtx.currentTime + 0.05;
+    timerID = setInterval(scheduler, lookahead);
+    playBtn.innerHTML = '&#9724;';
+    ring.classList.add('playing');
+  };
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().then(go);
+  } else {
+    go();
+  }
+}
+
+function stop() {
+  if (!playing) return;
+  playing = false;
+  clearInterval(timerID);
+  playBtn.innerHTML = '&#9654;';
+  ring.classList.remove('playing', 'accent');
+  progress.setAttribute('stroke-dashoffset', '929.91');
+  const dots = beatDotsEl.children;
+  for (let i = 0; i < dots.length; i++) dots[i].classList.remove('active', 'accent');
+}
+
+function toggle() { playing ? stop() : start(); }
+
+// ---- Controls ----
+playBtn.addEventListener('click', toggle);
+document.getElementById('decBtn').addEventListener('click', () => setBpm(bpm - 5));
+document.getElementById('incBtn').addEventListener('click', () => setBpm(bpm + 5));
+
+document.querySelectorAll('.time-select button').forEach(b =>
+  b.addEventListener('click', () => setBeats(+b.dataset.beats)));
+
+// Scroll to adjust
+window.addEventListener('wheel', e => {
+  e.preventDefault();
+  setBpm(bpm + (e.deltaY < 0 ? 1 : -1));
+}, { passive: false });
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); toggle(); }
+  if (e.code === 'ArrowUp') setBpm(bpm + 1);
+  if (e.code === 'ArrowDown') setBpm(bpm - 1);
+});
+
+// Tap tempo
+let tapTimes = [];
+document.addEventListener('keydown', e => {
+  if (e.code !== 'KeyT') return;
+  const now = performance.now();
+  tapTimes.push(now);
+  if (tapTimes.length > 6) tapTimes.shift();
+  if (tapTimes.length >= 2) {
+    const intervals = [];
+    for (let i = 1; i < tapTimes.length; i++) intervals.push(tapTimes[i] - tapTimes[i - 1]);
+    const avg = intervals.reduce((a, b) => a + b) / intervals.length;
+    setBpm(Math.round(60000 / avg));
+  }
+  // Reset if gap too long
+  if (tapTimes.length >= 2 && tapTimes[tapTimes.length - 1] - tapTimes[tapTimes.length - 2] > 3000) {
+    tapTimes = [now];
+  }
+});
+
+// ---- Toast ----
+let toastTimer;
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
+}
+
+// ---- Voice Commands ----
+const micIcon = document.getElementById('micIcon');
+const voiceLabel = document.getElementById('voiceLabel');
+
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+  const voiceLog = document.getElementById('voiceLog');
+
+  recognition.onstart = () => {
+    micIcon.classList.add('listening');
+    voiceLabel.textContent = 'listening...';
+  };
+
+  recognition.onresult = (e) => {
+    const last = e.results[e.results.length - 1];
+    const text = last[0].transcript.trim().toLowerCase();
+    voiceLog.textContent = (last.isFinal ? '"' : '... ') + text + (last.isFinal ? '"' : '');
+    console.log('Voice' + (last.isFinal ? '' : ' (interim)') + ':', text);
+    handleVoice(text);
+  };
+
+  let networkErrors = 0;
+  recognition.onerror = (e) => {
+    console.log('Speech error:', e.error);
+    voiceLog.textContent = 'error: ' + e.error;
+    if (e.error === 'network') {
+      networkErrors++;
+      if (networkErrors >= 2) {
+        recognition.onend = null; // stop auto-restart
+        micIcon.classList.remove('listening');
+        voiceLabel.textContent = 'voice unavailable (network error)';
+        voiceLog.textContent = 'type commands below instead';
+        showCmdInput();
+      }
+    }
+  };
+
+  recognition.onend = () => {
+    // Always auto-restart
+    micIcon.classList.remove('listening');
+    voiceLabel.textContent = 'restarting mic...';
+    setTimeout(() => {
+      try { recognition.start(); } catch (e) {
+        voiceLog.textContent = 'restart failed';
+      }
+    }, 100);
+  };
+
+  // Initial start needs user gesture for AudioContext; clicking anywhere will unlock
+  document.addEventListener('click', () => {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }, { once: true });
+
+  try { recognition.start(); } catch (e) {
+    voiceLog.textContent = 'mic start failed';
+  }
+
+} else {
+  voiceLabel.textContent = navigator.userAgent.includes('Firefox')
+    ? 'enable media.webspeech.recognition.enable in about:config'
+    : 'voice not supported in this browser';
+  showCmdInput();
+}
+
+let lastVoiceAction = 0;
+function handleVoice(text) {
+  const now = Date.now();
+  if (now - lastVoiceAction < 1500) return;
+
+  function act(fn) { lastVoiceAction = Date.now(); fn(); }
+
+  if (/fast|quick|speed|up.*tempo/i.test(text)) {
+    act(() => { setBpm(bpm + 10); showToast(bpm + ' BPM'); if (playing) { stop(); start(); } });
+    return;
+  }
+  if (/slow|down.*tempo/i.test(text)) {
+    act(() => { setBpm(bpm - 10); showToast(bpm + ' BPM'); if (playing) { stop(); start(); } });
+    return;
+  }
+
+  const numMatch = text.match(/\b(\d{2,3})\b/);
+  if (numMatch) {
+    const n = parseInt(numMatch[1]);
+    if (n >= 20 && n <= 300) {
+      act(() => { setBpm(n); showToast(n + ' BPM'); if (playing) { stop(); start(); } });
+      return;
+    }
+  }
+
+  if (/\b(3[/\s]4|three four|waltz)\b/.test(text)) { act(() => { setBeats(3); showToast('3/4'); }); return; }
+  if (/\b(4[/\s]4|four four|common)\b/.test(text)) { act(() => { setBeats(4); showToast('4/4'); }); return; }
+  if (/\b(2[/\s]4|two four|march)\b/.test(text)) { act(() => { setBeats(2); showToast('2/4'); }); return; }
+  if (/\b(6[/\s]8|six eight)\b/.test(text)) { act(() => { setBeats(6); showToast('6/8'); }); return; }
+
+  if (/\b(go|start|play)\b/i.test(text)) { act(() => { start(); showToast('Started'); }); return; }
+  if (/\b(stop|pause)\b/i.test(text)) { act(() => { stop(); showToast('Stopped'); }); return; }
+}
+
+function showCmdInput() {
+  const cmdDiv = document.getElementById('cmdInput');
+  const cmdField = document.getElementById('cmdField');
+  cmdDiv.style.display = 'flex';
+  cmdField.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') e.stopPropagation(); // prevent play/pause
+    if (e.key === 'Enter') {
+      const text = cmdField.value.trim().toLowerCase();
+      if (text) {
+        lastVoiceAction = 0; // no debounce for typed commands
+        handleVoice(text);
+        cmdField.value = '';
+      }
+    }
+  });
+}
+
+// ---- Init ----
+renderBeatDots();
+</script>
+</body>
+</html>
